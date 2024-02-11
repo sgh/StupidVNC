@@ -287,7 +287,6 @@ struct StupidvncServerPrivate {
 
 	std::list<StupidClient*> allClients;
 
-	bool dirty = true;
 	bool fb_geometry_changed = true;
 };
 
@@ -613,17 +612,16 @@ void frame_update_request(StupidClient* client) {
 }
 
 void framebuffer_update(StupidClient* client) {
-
-	client->mutex.lock();
-	auto dirtyRects = client->dirtyRects;
-	client->dirtyRects.clear();
-	client->mutex.unlock();
-
 	auto priv = client->server->_p;
 	priv->cb->framebufferUpdate(client);
 
 	if (client->pixel_format.depth !=24 || client->pixel_format.bpp !=32)
 		return;
+
+	client->mutex.lock();
+	auto dirtyRects = client->dirtyRects;
+	client->dirtyRects.clear();
+	client->mutex.unlock();
 
 	if (dirtyRects.empty())
 		return;
@@ -633,7 +631,6 @@ void framebuffer_update(StupidClient* client) {
 	if (client->supports_zrle) {
 		frame_update_header_t msg2;
 		msg2.type = RFB_FRAMEBUFFER_UPDATE;
-//		msg2.num_rects = htobe16(dirtyRects.size());
 		msg2.num_rects = htons(dirtyRects.size());
 		client->io->write(&msg2, sizeof(msg2));
 		for (auto & rect : dirtyRects) {
@@ -965,8 +962,7 @@ static void stupid_thread(void* arg) {
 		}
 		priv->server_mutex.unlock();
 
-		if (client->wants_framebuffer && priv->dirty) {
-			priv->dirty = false;
+		if (client->wants_framebuffer) {
 			priv->server_mutex.lock();
 			framebuffer_update(client);
 			priv->server_mutex.unlock();
@@ -1084,7 +1080,6 @@ void stupidvnc_dirty(StupidvncServer* server, int x, int y, unsigned int width, 
 		c->dirtyRects.push_back({x, y, width, height});
 		c->mutex.unlock();
 	}
-	priv->dirty = true;
 	priv->server_mutex.unlock();
 }
 
