@@ -40,7 +40,7 @@ int fb_width = 0;
 int fb_height = 0;
 static uint32_t* fb = nullptr;
 
-StupidvncServer* server;
+StupidvncServer server;
 
 void fetchRegion(Window window, int x, int y, int width, int height) {
 	XImage* image = XGetImage(display, window, x, y, width, height, AllPlanes, ZPixmap);
@@ -105,7 +105,7 @@ void captureFramebufferDamaged(Damage damage, Window window) {
 		// Now you can capture the framebuffer for the damaged region
 		// using XGetImage or other methods as needed
 		fetchRegion(window, x, y, width, height);
-		stupidvnc_dirty(server, x, y, width, height);
+		stupidvnc_dirty(&server, x, y, width, height);
 	}
 
 	XFree(rectangles);
@@ -126,7 +126,7 @@ void damageNotifyEvent(XEvent *event) {
 		auto new_fb = new uint32_t[attr.width * attr.height];
 		fb_width = attr.width;
 		fb_height = attr.height;
-		stupidvnc_set_framebuffer(server, new_fb, fb_width, fb_height);
+		stupidvnc_set_framebuffer(&server, new_fb, fb_width, fb_height);
 		if (fb)
 			delete[] fb;
 		fb = new_fb;
@@ -146,7 +146,7 @@ int main(int argc, char** argv)
 	signal(SIGPIPE, SIG_IGN);
 	OpenSSL_add_all_algorithms();
 
-	server = stupidvnc_init(nullptr);
+	stupidvnc_init(&server, nullptr);
 
     Window window = strtoull(argv[1], NULL, 16); // Parse window ID as hexadecimal
 
@@ -156,7 +156,7 @@ int main(int argc, char** argv)
 		exit(EXIT_FAILURE);
 	}
 
-	stupidvnc_start(server);
+	stupidvnc_start(&server);
 
 	int damageEventBase, damageErrorBase;
 		if (!XDamageQueryExtension(display, &damageEventBase, &damageErrorBase)) {

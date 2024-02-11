@@ -44,8 +44,15 @@ struct STUPIDVNC_EXPORT StupidvncCallbacks {
 
 STUPIDVNC_EXPORT bool stupidvnc_check_passwd(StupidClient* client, const std::string& passwd);
 
-struct StupidvncServer;
-STUPIDVNC_EXPORT StupidvncServer* stupidvnc_init(StupidvncCallbacks* cb);
+struct StupidvncServerPrivate;
+struct StupidvncServer {
+	bool show_updated_tiles = false;
+
+	StupidvncServerPrivate* _p; // private internal state
+};
+
+STUPIDVNC_EXPORT void stupidvnc_init(StupidvncServer* server, StupidvncCallbacks* cb);
+STUPIDVNC_EXPORT void stupidvnc_free(StupidvncServer* server);
 STUPIDVNC_EXPORT void stupidvnc_set_framebuffer(StupidvncServer* server, uint32_t *fb, unsigned int width, unsigned int height);
 STUPIDVNC_EXPORT void stupidvnc_disconnect(StupidClient* client);
 STUPIDVNC_EXPORT void stupidvnc_dirty(StupidvncServer* server, int x, int y, unsigned int width, unsigned int height);

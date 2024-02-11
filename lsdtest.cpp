@@ -153,11 +153,12 @@ int main() {
 
 	VNCCallbacks cb;
 	// cb.requirePassword = true;
-	auto s = stupidvnc_init(&cb);
-	stupidvnc_set_framebuffer(s, framebuffer, FRAMEBUFFER_WIDTH, FRAMEBUFFER_HEIGHT);
+	StupidvncServer s;
+	stupidvnc_init(&s, &cb);
+	stupidvnc_set_framebuffer(&s, framebuffer, FRAMEBUFFER_WIDTH, FRAMEBUFFER_HEIGHT);
 
-	cb.server = s;
-	stupidvnc_start(s);
+	cb.server = &s;
+	stupidvnc_start(&s);
 
 	for (;;) {
 #ifndef _WIN32
@@ -170,6 +171,6 @@ int main() {
 		if (t >= 2*M_PI)
 			t -= 2*M_PI;
 		drawSinePattern(t);
-		stupidvnc_dirty(s, 0, 0, 0, 0);
+		stupidvnc_dirty(&s, 0, 0, 0, 0);
 	}
 }

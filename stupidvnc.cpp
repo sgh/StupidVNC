@@ -275,7 +275,7 @@ struct frame_update_rect_header_t {
 	int32_t encoding_type;
 } __attribute__((packed));
 
-struct StupidvncServer {
+struct StupidvncServerPrivate {
 	uint32_t* framebuffer = nullptr;
 	unsigned int fb_width = 0;
 	unsigned int fb_height = 0;
@@ -464,10 +464,11 @@ static void key_event(StupidClient* client) {
 	client->io->read(&msg, sizeof(msg));
 	msg.key = ntohl(msg.key);
 	// printf("keyevent:  down:%d   key:%u\n", msg.down_flag, msg.key);
-	client->server->cb->keyEvent(client, msg.key, msg.down_flag);
+	client->server->_p->cb->keyEvent(client, msg.key, msg.down_flag);
 }
 
 void tx_frameupdate_raw(StupidClient* client) {
+	auto priv = client->server->_p;
 	// +----------------------------+--------------+-------------+
 	// | No. of bytes               | Type [Value] | Description |
 	// +----------------------------+--------------+-------------+
@@ -476,11 +477,11 @@ void tx_frameupdate_raw(StupidClient* client) {
 	frame_update_rect_header_t msg3;
 	msg3.x = htons(0);
 	msg3.y = htons(0);
-	msg3.w = htons(client->server->fb_width);
-	msg3.h = htons(client->server->fb_height);
+	msg3.w = htons(priv->fb_width);
+	msg3.h = htons(priv->fb_height);
 	msg3.encoding_type = RFB_ENCODING_RAW;
 	client->io->write(&msg3, sizeof(msg3));
-	client->io->write(client->server->framebuffer, sizeof(client->server->framebuffer));
+	client->io->write(priv->framebuffer, sizeof(priv->framebuffer));
 }
 
 void run_deflate(StupidClient* client, int flush_mode) {
@@ -528,10 +529,15 @@ static void tx_frameupdate_zrle(StupidClient* client, int x, int y, unsigned int
 	client->stream.total_in = 0;
 
 	zlre_tile_raw raw;
+	auto priv = client->server->_p;
 
 	// CPIXEL is a layout thing *NOT* a values this
 	// BGRx -> CPIXEL 3 bytes
 	// RxGB -> CPIXEL 4 bytes
+
+	int rand_r;
+	int  rand_g;
+	int rand_b;
 
 	const auto red_shift = client->pixel_format.red_shift;
 	const auto green_shift = client->pixel_format.green_shift;
@@ -540,24 +546,37 @@ static void tx_frameupdate_zrle(StupidClient* client, int x, int y, unsigned int
 	const unsigned int tile_size = 64;
     const unsigned int pixel_stride = 3; // 3 bytes per pixel
 
+	const auto show_updated_tiles = client->server->show_updated_tiles;
+
 	for (auto starty=0u; starty < height; starty += tile_size) {
 		unsigned int copy_height = std::min(height - starty, tile_size);
 
 		for (auto startx=0u; startx < width; startx += tile_size) {
 			unsigned int copy_width = std::min(width - startx, tile_size);
-			auto srcptr = &client->server->framebuffer[(x+startx) + (y+starty)*client->server->fb_width];
+			auto srcptr = &priv->framebuffer[(x+startx) + (y+starty)*priv->fb_width];
 			auto dstptr = raw.rgb;
+			if (show_updated_tiles) {
+				rand_r = rand() & 0xff;
+				rand_g = rand() & 0xff;
+				rand_b = rand() & 0xff;
+			}
 			for (auto trow=0u; trow<copy_height; trow++) {
 				for (auto i=0u; i<copy_width; i++) {
 					const auto pix = srcptr[i];
-					const auto r = (pix >> 16) & 0xff;
-					const auto g = (pix >> 8) & 0xff;
-					const auto b = (pix >> 0) & 0xff;
+					auto r = (pix >> 16) & 0xff;
+					auto g = (pix >> 8) & 0xff;
+					auto b = (pix >> 0) & 0xff;
+					if (show_updated_tiles) {
+						r = r*0.8 + rand_r*0.2;
+						g = g*0.8 + rand_g*0.2;
+						b = b*0.8 + rand_b*0.2;
+					}
+
 					unsigned int val = r << red_shift | g << green_shift | b << blue_shift;
 					dstptr->val = val;
 					dstptr++;
 				}
-				srcptr += client->server->fb_width;
+				srcptr += priv->fb_width;
 			}
 
 			client->stream.avail_in = 1 + copy_width * copy_height * pixel_stride;
@@ -600,7 +619,8 @@ void framebuffer_update(StupidClient* client) {
 	client->dirtyRects.clear();
 	client->mutex.unlock();
 
-	client->server->cb->framebufferUpdate(client);
+	auto priv = client->server->_p;
+	priv->cb->framebufferUpdate(client);
 
 	if (client->pixel_format.depth !=24 || client->pixel_format.bpp !=32)
 		return;
@@ -630,16 +650,18 @@ void framebuffer_update(StupidClient* client) {
 }
 
 static void framebuffer_update_size(StupidClient* client) {
-		frame_update_header_t msg2;
-		msg2.type = RFB_FRAMEBUFFER_UPDATE;
-		msg2.num_rects = htons(1);
-		client->io->write(&msg2, sizeof(msg2));
+	frame_update_header_t msg2;
+	msg2.type = RFB_FRAMEBUFFER_UPDATE;
+	msg2.num_rects = htons(1);
+	client->io->write(&msg2, sizeof(msg2));
+
+	auto priv = client->server->_p;
 
 	frame_update_rect_header_t msg3;
 	msg3.x = htons(0);
 	msg3.y = htons(0);
-	msg3.w = htons(client->server->fb_width);
-	msg3.h = htons(client->server->fb_height);
+	msg3.w = htons(priv->fb_width);
+	msg3.h = htons(priv->fb_height);
 	msg3.encoding_type = htonl(RFB_ENCODING_DESKTOPSIZE_PSEUDO);
 	client->io->write(&msg3, sizeof(msg3));
 }
@@ -713,12 +735,13 @@ void set_encoding(StupidClient* client) {
 }
 
 static void pointer_event(StupidClient* client) {
+	auto priv = client->server->_p;
 	pointer_event_t msg;
 	client->io->read(&msg, sizeof(msg));
 	msg.x = ntohs(msg.x);
 	msg.y = ntohs(msg.y);
 	// printf("Pointer event  mask:0x%02X  x:%d y:%d\n", msg.button_mask, msg.x, msg.y);
-	client->server->cb->pointerEvent(client, msg.x, msg.y, msg.button_mask);
+	priv->cb->pointerEvent(client, msg.x, msg.y, msg.button_mask);
 
 }
 
@@ -795,7 +818,7 @@ static unsigned char reverse_bits(unsigned char b) {
 }
 
 static bool vnc_auth(StupidClient* client) {
-
+	auto priv = client->server->_p;
 	RAND_bytes(client->challenge, sizeof(client->challenge));
 
 	client->io->write(client->challenge, sizeof(client->challenge));
@@ -805,7 +828,7 @@ static bool vnc_auth(StupidClient* client) {
 	// RX 16 byte response
 
 	uint32_t security_result = htonl(RFB_STATUS_OK);
-	if (!client->server->cb->clientAuth(client)) {
+	if (!priv->cb->clientAuth(client)) {
 		uint32_t security_result = htonl(RFB_STATUS_FAILED);
 		const char* error_string = "you entered a stupid password";
 		client->io->write(&security_result, sizeof(security_result));
@@ -854,6 +877,7 @@ bool stupidvnc_check_passwd([[maybe_unused]] StupidClient *client, [[maybe_unuse
 #endif
 
 static bool client_handshake(StupidClient* client) {
+	auto priv = client->server->_p;
 	static const char* ident = "RFB 003.008\n";
 	client->io->write(ident, 12);
 	printf("Transmitted ident\n");
@@ -869,7 +893,7 @@ static bool client_handshake(StupidClient* client) {
 	security_types[0] = 0;
 
 	// No authentication
-	if (!client->server->cb->requirePassword) {
+	if (!priv->cb->requirePassword) {
 		security_types[0]++;
 		security_types[++security_types_len] = RFB_SEC_NONE;
 	}
@@ -908,19 +932,20 @@ static bool client_handshake(StupidClient* client) {
 
 	struct server_init_msg_t server_init_msg;
 	const char* name = "STUPIDRFB";
-	server_init_msg.width = htons(client->server->fb_width);
-	server_init_msg.height = htons(client->server->fb_height);
+	server_init_msg.width = htons(priv->fb_width);
+	server_init_msg.height = htons(priv->fb_height);
 	server_init_msg.namelength = htonl( strlen(name));
 	client->io->write(&server_init_msg, sizeof(server_init_msg));
 	client->io->write(name, strlen(name));
 
-	client->server->cb->clientConnected(client);
+	priv->cb->clientConnected(client);
 	return true;
 }
 
 static void stupid_thread(void* arg) {
 	auto client = (StupidClient*)arg;
 	auto server = client->server;
+	auto priv = server->_p;
 
 	client->io->handshake();
 	if (!client_handshake(client)) {
@@ -930,21 +955,21 @@ static void stupid_thread(void* arg) {
 	}
 
 	while (!client->disconnect) {
-		server->server_mutex.lock();
-		if (server->fb_geometry_changed) {
-			server->fb_geometry_changed = false;
+		priv->server_mutex.lock();
+		if (priv->fb_geometry_changed) {
+			priv->fb_geometry_changed = false;
 
 			if (client->supports_fb_geometry_change) {
 				framebuffer_update_size(client);
 			}
 		}
-		server->server_mutex.unlock();
+		priv->server_mutex.unlock();
 
-		if (client->wants_framebuffer && server->dirty) {
-			server->dirty = false;
-			server->server_mutex.lock();
+		if (client->wants_framebuffer && priv->dirty) {
+			priv->dirty = false;
+			priv->server_mutex.lock();
 			framebuffer_update(client);
-			server->server_mutex.unlock();
+			priv->server_mutex.unlock();
 		}
 
 		uint8_t type;
@@ -985,27 +1010,33 @@ static void stupid_thread(void* arg) {
 		}
 
 	}
-	server->server_mutex.lock();
-	auto it = std::find(server->allClients.begin(), server->allClients.end(), client);
-	server->allClients.erase(it);
-	server->server_mutex.unlock();
-	server->cb->clientDisconnected(client);
+	priv->server_mutex.lock();
+	auto it = std::find(priv->allClients.begin(), priv->allClients.end(), client);
+	priv->allClients.erase(it);
+	priv->server_mutex.unlock();
+	priv->cb->clientDisconnected(client);
 	delete client;
 }
 
-StupidvncServer* stupidvnc_init(StupidvncCallbacks* cb) {
+void stupidvnc_init(StupidvncServer* server, StupidvncCallbacks* cb) {
 	static StupidvncCallbacks default_cb;
-	auto server = new StupidvncServer;
-	server->cb = cb ? cb : &default_cb;
-	return server;
+	auto priv = new StupidvncServerPrivate;
+	server->_p = priv;
+	priv->cb = cb ? cb : &default_cb;
+}
+
+void stupidvnc_free(StupidvncServer *server) {
+	delete server->_p;
+	server->_p = nullptr;
 }
 
 static void server_run(void* arg) {
 	auto server = (StupidvncServer*)arg;
+	auto priv = server->_p;
 	int server_sock = bind_server_socket(5900);
 	// int server_sock = bind_server_socket(8080);
 
-	while (!server->quit) {
+	while (!priv->quit) {
 		fd_set read_fds;
 		FD_ZERO(&read_fds);
 		FD_SET(server_sock, &read_fds);
@@ -1018,10 +1049,10 @@ static void server_run(void* arg) {
 			// io = get_ws_io(io);
 			auto client = new StupidClient(io);
 			client->server = server;
-			client->dirtyRects.push_back({0, 0, server->fb_width, server->fb_height});
-			server->server_mutex.lock();
-			server->allClients.push_back(client);
-			server->server_mutex.unlock();
+			client->dirtyRects.push_back({0, 0, priv->fb_width, priv->fb_height});
+			priv->server_mutex.lock();
+			priv->allClients.push_back(client);
+			priv->server_mutex.unlock();
 
 			auto th = new std::thread(stupid_thread, client);
 			th->detach();
@@ -1030,44 +1061,48 @@ static void server_run(void* arg) {
 }
 
 void stupidvnc_start(StupidvncServer* server) {
+	auto priv = server->_p;
 	assert(!server->thread.joinable());
-	server->quit = false;
-	server->thread = std::thread(server_run, server);
+	priv->quit = false;
+	priv->thread = std::thread(server_run, server);
 }
 
 void stupidvnc_stop(StupidvncServer* server) {
-	assert(server->thread.joinable());
-	server->quit = true;
-	server->thread.join();
+	auto priv = server->_p;
+	assert(priv->thread.joinable());
+	priv->quit = true;
+	priv->thread.join();
 }
 
-void stupidvnc_dirty(StupidvncServer *server, int x, int y, unsigned int width, unsigned int height) {
-	server->server_mutex.lock();
-	if (width == 0) width = server->fb_width;
-	if (height == 0) height = server->fb_height;
-	for (auto c : server->allClients) {
+void stupidvnc_dirty(StupidvncServer* server, int x, int y, unsigned int width, unsigned int height) {
+	auto priv = server->_p;
+	priv->server_mutex.lock();
+	if (width == 0) width = priv->fb_width;
+	if (height == 0) height = priv->fb_height;
+	for (auto c : priv->allClients) {
 		c->mutex.lock();
 		c->dirtyRects.push_back({x, y, width, height});
 		c->mutex.unlock();
 	}
-	server->dirty = true;
-	server->server_mutex.unlock();
+	priv->dirty = true;
+	priv->server_mutex.unlock();
 }
 
-void stupidvnc_set_framebuffer(StupidvncServer *server, uint32_t *fb, unsigned int width, unsigned int height) {
-	server->server_mutex.lock();
-	server->framebuffer = fb;
+void stupidvnc_set_framebuffer(StupidvncServer* server, uint32_t *fb, unsigned int width, unsigned int height) {
+	auto priv = server->_p;
+	priv->server_mutex.lock();
+	priv->framebuffer = fb;
 
-	if (server->fb_width != width) {
-		server->fb_geometry_changed = true;
-		server->fb_width = width;
+	if (priv->fb_width != width) {
+		priv->fb_geometry_changed = true;
+		priv->fb_width = width;
 	}
 
-	if (server->fb_height != height) {
-		server->fb_geometry_changed = true;
-		server->fb_height = height;
+	if (priv->fb_height != height) {
+		priv->fb_geometry_changed = true;
+		priv->fb_height = height;
 	}
-	server->server_mutex.unlock();
+	priv->server_mutex.unlock();
 }
 
 void stupidvnc_disconnect(StupidClient *client) {
