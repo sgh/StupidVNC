@@ -148,6 +148,8 @@ int main(int argc, char** argv)
 	signal(SIGPIPE, SIG_IGN);
 	OpenSSL_add_all_algorithms();
 
+	server.show_updated_tiles = true;
+	server.port = 5900;
 	stupidvnc_init(&server, nullptr);
 
     Window window = strtoull(argv[1], NULL, 16); // Parse window ID as hexadecimal

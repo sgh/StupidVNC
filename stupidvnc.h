@@ -47,6 +47,7 @@ STUPIDVNC_EXPORT bool stupidvnc_check_passwd(StupidClient* client, const std::st
 struct StupidvncServerPrivate;
 struct StupidvncServer {
 	bool show_updated_tiles = false;
+	int port = 5900;
 
 	StupidvncServerPrivate* _p; // private internal state
 };

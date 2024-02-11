@@ -1029,7 +1029,7 @@ void stupidvnc_free(StupidvncServer *server) {
 static void server_run(void* arg) {
 	auto server = (StupidvncServer*)arg;
 	auto priv = server->_p;
-	int server_sock = bind_server_socket(5900);
+	int server_sock = bind_server_socket(server->port);
 	// int server_sock = bind_server_socket(8080);
 
 	while (!priv->quit) {
