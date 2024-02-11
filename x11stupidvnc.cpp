@@ -130,6 +130,8 @@ void damageNotifyEvent(XEvent *event) {
 		if (fb)
 			delete[] fb;
 		fb = new_fb;
+		fetchRegion(window, 0, 0, fb_width, fb_height);
+		stupidvnc_dirty(&server, 0, 0, fb_width, fb_height);
 	}
 
 	captureFramebufferDamaged(damage, window);
