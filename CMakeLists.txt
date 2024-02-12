@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.10)
 project(stupidvnc)
 
+set(BUILD_SHARED_LIBS TRUE)
+
 if (WIN32)
 #	set(OPENSSL_ROOT_DIR "Z:/makin3d_sysroot_win64/2.24")
     set(OpenSSL_ROOT "Z:/makin3d_sysroot_win64/2.24")
@@ -37,7 +39,7 @@ if (WIN32)
 endif()
 
 if (OPENSSL_FOUND)
-	target_link_libraries(stupidvnc PRIVATE OpenSSL::Crypto)
+	target_link_libraries(stupidvnc PUBLIC OpenSSL::Crypto)
 	target_compile_definitions(stupidvnc PRIVATE HAS_OPENSSL)
 endif()
 
