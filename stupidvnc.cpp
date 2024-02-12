@@ -1058,7 +1058,7 @@ static void server_run(void* arg) {
 
 void stupidvnc_start(StupidvncServer* server) {
 	auto priv = server->_p;
-	assert(!server->thread.joinable());
+	assert(!priv->thread.joinable());
 	priv->quit = false;
 	priv->thread = std::thread(server_run, server);
 }
