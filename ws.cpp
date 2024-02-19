@@ -83,7 +83,9 @@ static int write_websocket_header(unsigned char* header, unsigned int len) {
 		} else {
 			header[1] = 127;
 			len_bytes = 8;
+			// uint64_t len64 = ntohl(len);
 			uint64_t len64 = ntohl(len);
+			len64 <<= 32;
 			memcpy(&header[2], &len64, len_bytes);
 		}
 	}
