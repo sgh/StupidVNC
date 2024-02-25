@@ -2,6 +2,9 @@ cmake_minimum_required(VERSION 3.10)
 project(stupidvnc)
 
 set(BUILD_SHARED_LIBS TRUE)
+if (NOT CMAKE_BUILD_TYPE)
+	set(CMAKE_BUILD_TYPE "RelWithDebInfo")
+endif()
 
 if (WIN32)
 #	set(OPENSSL_ROOT_DIR "Z:/makin3d_sysroot_win64/2.24")
