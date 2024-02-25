@@ -143,16 +143,20 @@ struct WSIO : IStupidIO {
 		delete _io;
 	}
 
-	bool read_websocket_header(bool block) {
+	int read_websocket_header(bool block) {
+		int hlen = 0;
 		unsigned char header[MAX_WS_HEADER_LEN];
 		int ret = _io->read(header + 0, 1, block); // Read minimum header
 		if (ret == -1)
-			return false;
+			return ret;
 
-		_io->read(header + 1, 1); // Read minimum header
+		ret = _io->read(header + 1, 1); // Read minimum header
 
-		// if (ret == 0)
-			// return false;
+		STUPID_LOG(TRACE_WS_READ, "Read1 ret:%d", ret);
+		if (ret <= 0)
+			return ret;
+
+		hlen += ret;
 
 		bool fin = header[0] & 0x80;
 		int len = header[1] & 0x7f;
@@ -164,10 +168,14 @@ struct WSIO : IStupidIO {
 
 		ret = _io->read(&_masking_key, 4);
 
+		STUPID_LOG(TRACE_WS_READ, "Read2 ret:%d\n", ret);
+		assert (ret == 4);
+		hlen += ret;
+
 		// fflush(0);
 		_payload_left = len;
 		_payload_idx = 0;
-		return true;
+		return hlen;
 	}
 
 
@@ -178,8 +186,10 @@ struct WSIO : IStupidIO {
 		int ret;
 		do {
 			if (_payload_left == 0) {
-				if (!read_websocket_header(block))
-					return -1;
+				ret = read_websocket_header(block);
+				STUPID_LOG(TRACE_WS_READ, "Read header ret:%d\n", ret);
+				if (ret <= 0)
+					return ret;
 			}
 
 			ret = _io->read(cdst, len);
