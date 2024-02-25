@@ -63,6 +63,7 @@ struct StupidvncServerPrivate;
 struct StupidvncServer {
 	bool show_updated_tiles = false;
 	int port = 5900;
+	bool use_websocket = false;
 
 	StupidvncServerPrivate* _p; // private internal state
 };

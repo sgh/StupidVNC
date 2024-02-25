@@ -956,6 +956,10 @@ static void stupid_thread(void* arg) {
 		return;
 	}
 
+	priv->server_mutex.lock();
+	priv->allClients.push_back(client);
+	priv->server_mutex.unlock();
+
 	while (!client->disconnect) {
 		priv->server_mutex.lock();
 		if (priv->fb_geometry_changed) {
@@ -1049,13 +1053,11 @@ static void server_run(void* arg) {
 			int sock = accept(server_sock, nullptr, 0);
 
 			IStupidIO* io = new RAWIO(sock);
-			// io = get_ws_io(io);
+			if(server->use_websocket)
+					io = get_ws_io(io);
 			auto client = new StupidClient(io);
 			client->server = server;
 			client->dirtyRects.push_back({0, 0, priv->fb_width, priv->fb_height});
-			priv->server_mutex.lock();
-			priv->allClients.push_back(client);
-			priv->server_mutex.unlock();
 
 			auto th = new std::thread(stupid_thread, client);
 			th->detach();
