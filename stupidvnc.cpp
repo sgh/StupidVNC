@@ -117,6 +117,12 @@ static constexpr int ZOUT_INCREMENT = 4096;
 #define RFB_STATUS_OK 0
 #define RFB_STATUS_FAILED 1
 
+static constexpr bool TRACE_INFO = true;
+static constexpr bool TRACE_DEBUG = false;
+static constexpr bool TRACE_COMM = false;
+static constexpr bool TRACE_CONNECITONS = true;
+static constexpr bool TRACE_MSG = false;
+
 enum ClientToServerMsg {
 	RFB_SET_PIXEL_FORMAT      = 0,
 	RFB_SET_ENCODINGS         = 2,
@@ -315,7 +321,7 @@ struct StupidClient {
 		this->io = io;
 		int ret = deflateInit(&stream,  Z_DEFAULT_COMPRESSION);
 		if (ret != Z_OK) {
-			printf("Error inititializing zstream");
+			STUPID_LOGE("Error inititializing zstream");
 		}
 	}
 	~StupidClient() {
@@ -369,7 +375,7 @@ struct RAWIO : IStupidIO {
 		int ret;
 		if (block) {
 			ret = ::recv(_socket, (char*)dst, len, 0);
-			// printf("recv: ret: %d\n", ret);
+			STUPID_LOG(TRACE_COMM, "recv ret:%d", ret);
 			return ret;
 		}
 
@@ -383,14 +389,15 @@ struct RAWIO : IStupidIO {
 		ret = select(_socket+1, &read_fds, nullptr, nullptr, &tv);
 		if (ret == 1) {
 			ret = ::recv(_socket, (char*)dst, len, 0);
-			// printf("recv: ret: %d\n", ret);
+			STUPID_LOG(TRACE_COMM, "recv ret:%d", ret);
 			return ret;
 		}
 		return -1;
 	}
 
 	void write(const void* src, unsigned int len) override {
-		send(_socket, (const char*)src, len, 0);
+		int ret = send(_socket, (const char*)src, len, 0);
+		STUPID_LOG(TRACE_COMM, "send ret:%d", ret);
 	}
 
 private:
@@ -408,7 +415,7 @@ static bool resolve_hostname(struct sockaddr_in* serveraddr, const char* hostnam
 	hints.ai_socktype = SOCK_STREAM;
 
 	if ( (rv = getaddrinfo( hostname , nullptr , &hints , &servinfo)) != 0) {
-		fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
+		STUPID_LOGE("getaddrinfo: %s\n", gai_strerror(rv));
 		return false;
 	}
 
@@ -436,7 +443,7 @@ int bind_server_socket(int port) {
 
 	int so_reuseaddr = 1;
 	if (setsockopt(sd,SOL_SOCKET, SO_REUSEADDR, (const char*)&so_reuseaddr, sizeof(so_reuseaddr)) < 0) {
-		perror("TCP server - setsockopt() error");
+		STUPID_LOGE("TCP server - setsockopt() error");
 		closesocket(sd);
 		return -1;
 	}
@@ -444,14 +451,14 @@ int bind_server_socket(int port) {
 	resolve_hostname(&serveraddr, "0.0.0.0");
 	serveraddr.sin_port = htons(port);
 	if ((rc = bind(sd, (struct sockaddr *)&serveraddr, serveraddrlen)) < 0) {
-		fprintf(stderr, "Error binding %s", strerror(rc));
+		STUPID_LOGE("Error binding %s", strerror(rc));
 		closesocket(sd);
 		sd = -1;
 	}
 
-	printf("TCP server - Listening...\n");
+	STUPID_LOG(TRACE_INFO, "TCP server - Listening...");
 	if (listen(sd, 100) < 0) { // backlog 100
-		perror("TCP server - listen() error");
+		STUPID_LOGE("TCP server - listen() error");
 		closesocket(sd);
 		return -1;
 	}
@@ -462,7 +469,7 @@ static void key_event(StupidClient* client) {
 	key_event_t msg;
 	client->io->read(&msg, sizeof(msg));
 	msg.key = ntohl(msg.key);
-	// printf("keyevent:  down:%d   key:%u\n", msg.down_flag, msg.key);
+	STUPID_LOG(TRACE_MSG, "keyevent:  down:%d   key:%u", msg.down_flag, msg.key);
 	client->server->_p->cb->keyEvent(client, msg.key, msg.down_flag);
 }
 
@@ -594,7 +601,7 @@ static void tx_frameupdate_zrle(StupidClient* client, int x, int y, unsigned int
 	assert(client->stream.avail_in == 0);
 
 	auto duration = (now() - time_start) / 1000;
-	printf("Write zlib data %lu compressed bytes : %lu raw   time:%" PRIi64 "ms\n", client->stream.total_out, client->stream.total_in, duration);
+	STUPID_LOG(TRACE_DEBUG, "Write zlib data %lu compressed bytes : %lu raw   time:%" PRIi64 "ms\n", client->stream.total_out, client->stream.total_in, duration);
 	uint32_t zlibsize = htonl(client->stream.total_out);
 	client->io->write(&zlibsize, sizeof(zlibsize));
 	client->io->write(client->zout, client->stream.total_out);
@@ -607,7 +614,7 @@ void frame_update_request(StupidClient* client) {
 	msg.y = ntohs(msg.y);
 	msg.w = ntohs(msg.w);
 	msg.h = ntohs(msg.h);
-	// printf("Frame update request x:%d y:%d w:%d h:%d \n", msg.x, msg.y, msg.w, msg.h);
+	STUPID_LOG(TRACE_DEBUG, "Frame update request x:%d y:%d w:%d h:%d \n", msg.x, msg.y, msg.w, msg.h);
 	client->wants_framebuffer = true;
 }
 
@@ -634,7 +641,7 @@ void framebuffer_update(StupidClient* client) {
 		msg2.num_rects = htons(dirtyRects.size());
 		client->io->write(&msg2, sizeof(msg2));
 		for (auto & rect : dirtyRects) {
-			// printf("Update %d %d %d %d\n", rect.x, rect.y, rect.width, rect.height);
+			STUPID_LOG(TRACE_DEBUG, "Update %d %d %d %d", rect.x, rect.y, rect.width, rect.height);
 			tx_frameupdate_zrle(client, rect.x, rect.y, rect.width, rect.height);
 		}
 	} else {
@@ -679,7 +686,7 @@ void set_pixel_format(StupidClient* client) {
 	client->pixel_format.green_max = ntohs(client->pixel_format.green_max);
 	client->pixel_format.blue_max = ntohs(client->pixel_format.blue_max);
 
-	printf("format: bpp:%d depth:%d be:%d truecolor:%d rmax:%d gmax:%d bmax:%d rshift:%d gshift:%d, bshift:%d\n",
+	STUPID_LOG(TRACE_MSG, "format: bpp:%d depth:%d be:%d truecolor:%d rmax:%d gmax:%d bmax:%d rshift:%d gshift:%d, bshift:%d",
 		   client->pixel_format.bpp,
 		   client->pixel_format.depth,
 		   client->pixel_format.big_endian,
@@ -706,7 +713,7 @@ void set_encoding(StupidClient* client) {
 	client->io->read(&count, 1);
 	client->io->read(&count, 2);
 	count = ntohs(count);
-	printf("%d encodings\n", count);
+	STUPID_LOG(TRACE_INFO,"%d encodings", count);
 	while (count--) {
 		int32_t encoding;
 		// +--------------+--------------+---------------+
@@ -718,15 +725,15 @@ void set_encoding(StupidClient* client) {
 
 		encoding = (int32_t)ntohl(encoding);
 		switch (encoding) {
-			case RFB_ENCODING_RAW:                printf("   encoding RAW\n"); break;
-			case RFB_ENCODING_COPYRECT:           printf("   encoding COPYRECT\n"); break;
-			case RFB_ENCODING_RRE:                printf("   encoding RRE\n"); break;
-			case RFB_ENCODING_HEXTILE:            printf("   encoding HEXTILE\n"); break;
-			case RFB_ENCODING_TRLE:               printf("   encoding TRLE\n"); break;
-			case RFB_ENCODING_ZRLE:               printf("   encoding ZRLE\n"); client->supports_zrle=true;  break;
-			case RFB_ENCODING_CURSOR_PSEUDO:      printf("   encoding CURSOR\n"); break;
-			case RFB_ENCODING_DESKTOPSIZE_PSEUDO: printf("   encoding DESKTOP\n"); client->supports_fb_geometry_change = true; break;
-			default: printf("   encoding UNKNOWN %d)\n", encoding);
+			case RFB_ENCODING_RAW:                STUPID_LOG(TRACE_INFO, "   encoding RAW"); break;
+			case RFB_ENCODING_COPYRECT:           STUPID_LOG(TRACE_INFO, "   encoding COPYRECT"); break;
+			case RFB_ENCODING_RRE:                STUPID_LOG(TRACE_INFO, "   encoding RRE"); break;
+			case RFB_ENCODING_HEXTILE:            STUPID_LOG(TRACE_INFO, "   encoding HEXTILE"); break;
+			case RFB_ENCODING_TRLE:               STUPID_LOG(TRACE_INFO, "   encoding TRLE"); break;
+			case RFB_ENCODING_ZRLE:               STUPID_LOG(TRACE_INFO, "   encoding ZRLE"); client->supports_zrle=true;  break;
+			case RFB_ENCODING_CURSOR_PSEUDO:      STUPID_LOG(TRACE_INFO, "   encoding CURSOR"); break;
+			case RFB_ENCODING_DESKTOPSIZE_PSEUDO: STUPID_LOG(TRACE_INFO, "   encoding DESKTOP"); client->supports_fb_geometry_change = true; break;
+			default: STUPID_LOG(TRACE_INFO, "   encoding UNKNOWN %d)", encoding);
 		}
 	}
 }
@@ -737,7 +744,7 @@ static void pointer_event(StupidClient* client) {
 	client->io->read(&msg, sizeof(msg));
 	msg.x = ntohs(msg.x);
 	msg.y = ntohs(msg.y);
-	// printf("Pointer event  mask:0x%02X  x:%d y:%d\n", msg.button_mask, msg.x, msg.y);
+	STUPID_LOG(TRACE_MSG, "Pointer event  mask:0x%02X  x:%d y:%d", msg.button_mask, msg.x, msg.y);
 	priv->cb->pointerEvent(client, msg.x, msg.y, msg.button_mask);
 
 }
@@ -758,13 +765,13 @@ void client_cut_text(StupidClient* client) {
 	len = ntohl(len);
 	client->io->read(dummy, len);
 	dummy[len] = 0;
-	printf("SERVER CUT: %s\n", dummy);
+	STUPID_LOG(TRACE_MSG, "SERVER CUT: %s\n", dummy);
 }
 
 #ifdef HAS_OPENSSL
 void handleErrors(void) {
 	// Handle errors here. You can customize this function based on your needs.
-	fprintf(stderr, "An error occurred\n");
+	STUPID_LOGE("An error occurred");
 	exit(EXIT_FAILURE);
 }
 
@@ -877,12 +884,11 @@ static bool client_handshake(StupidClient* client) {
 	auto priv = client->server->_p;
 	static const char* ident = "RFB 003.008\n";
 	client->io->write(ident, 12);
-	printf("Transmitted ident\n");
 
 	char buf[1024];
 	int ret = client->io->read(buf, 12);
 	buf[ret] = 0;
-	printf("Client: %s\n", buf);
+	STUPID_LOG(TRACE_INFO, "Client: %s", buf);
 
 	int security_types_len = 0;
 	uint8_t security_types[8];
@@ -903,7 +909,7 @@ static bool client_handshake(StupidClient* client) {
 
 	uint8_t selected_security;
 	ret = client->io->read(&selected_security, 1);
-	printf("Client selected security type %d\n", selected_security);
+	STUPID_LOG(TRACE_INFO, "Client selected security type %d", selected_security);
 
 	// If sec!=null
 	// server send 16 byte random challenge
@@ -925,7 +931,7 @@ static bool client_handshake(StupidClient* client) {
 
 	// Shared is 0 if the server should disconnect other clients
 	ret = client->io->read(buf, 1);
-	printf("Client - shared %d\n", buf[0]);
+	STUPID_LOG(TRACE_INFO, "Client - shared %d", buf[0]);
 
 	struct server_init_msg_t server_init_msg;
 	const char* name = "STUPIDRFB";
@@ -947,7 +953,6 @@ static void stupid_thread(void* arg) {
 	client->io->handshake();
 	if (!client_handshake(client)) {
 		delete client;
-		printf("Exiting loop\n");
 		return;
 	}
 
@@ -969,23 +974,25 @@ static void stupid_thread(void* arg) {
 		}
 
 		uint8_t type;
+		STUPID_LOG(TRACE_COMM, "read start\n");
 		int ret = client->io->read(&type, 1, false);
+		STUPID_LOG(TRACE_COMM, "read end ret: %d", ret);
 
 		if (ret == -1)
 			continue;
 
 		if (ret == 0) {
-			printf("Disconnected\n");
+			STUPID_LOG(TRACE_CONNECITONS, "Disconnected");
 			break;
 		}
 
 		switch(type) {
 			case RFB_SET_PIXEL_FORMAT:
-				printf("RFB_SET_PIXEL_FORMAT\n");
+				STUPID_LOG(TRACE_MSG ,"RFB_SET_PIXEL_FORMAT");
 				set_pixel_format(client);
 			break;
 			case RFB_SET_ENCODINGS:
-				printf("RFB_SET_ENCODINGS\n");
+				STUPID_LOG(TRACE_MSG, "RFB_SET_ENCODINGS");
 				set_encoding(client);
 				break;
 			case RFB_FRAME_UPDATE_REQUEST:
@@ -998,7 +1005,7 @@ static void stupid_thread(void* arg) {
 				pointer_event(client);
 				break;
 			case RFB_CLIENT_CUT_TEXT:
-				printf("RFB_CLIENT_CUT_TEXT\n");
+				STUPID_LOG(TRACE_MSG, "RFB_CLIENT_CUT_TEXT\n");
 				client_cut_text(client);
 				break;
 			default:

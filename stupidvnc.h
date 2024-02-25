@@ -28,6 +28,21 @@
 #define RFB_MOUSE_WHEEL_UP   (1<<3)
 #define RFB_MOUSE_WHEEL_DOWN (1<<4)
 
+
+#define __FILENAME__ (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)
+
+#define STUPID_LOG(trace, message, ...) \
+	do { \
+		if (trace) \
+			printf("%s: %d " message "\n", __FILENAME__, __LINE__, ##__VA_ARGS__); \
+	} while (0)
+
+#define STUPID_LOGE(message, ...) \
+	do { \
+		fprintf(stderr, "%s: %d " message "\n", __FILENAME__, __LINE__, ##__VA_ARGS__); \
+	} while (0)
+
+
 struct StupidClient;
 struct STUPIDVNC_EXPORT StupidvncCallbacks {
 	bool requirePassword = false;

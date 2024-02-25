@@ -28,6 +28,9 @@
 
 // https://www.rfc-editor.org/rfc/rfc6455.html
 
+static constexpr bool TRACE_WS_READ = false;
+static constexpr bool TRACE_WS_HANDSHAKE = false;
+
 static char* base64_encode(const unsigned char* input, size_t input_len) {
 	const char base64_chars[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 	size_t output_len = 4 * ((input_len + 2) / 3);  // Calculate the length of the Base64 encoded string
@@ -191,7 +194,7 @@ int read_webs_socket_header() {
 void ws_handshake(IStupidIO* io) {
 	char buffer[1024] = {0};
 	io->read(buffer, sizeof(buffer));
-	printf("Received message from client: %s\n", buffer);
+	STUPID_LOG(TRACE_WS_HANDSHAKE, "Received message from client: %s", buffer);
 
 	std::string sec;
 	auto sec_ws_key = strstr(buffer, "Sec-WebSocket-Key: ");
@@ -213,7 +216,7 @@ void ws_handshake(IStupidIO* io) {
 	int len = snprintf((char*)response, sizeof(response), "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: %s\r\n\r\n", response_sec);
 	free(response_sec);
 
-	printf("\"%s\"\n", response);
+	STUPID_LOG(TRACE_WS_HANDSHAKE, "\"%s\"", response);
 
 	io->write(response, len);
 }
@@ -247,7 +250,7 @@ struct WSIO : IStupidIO {
 		int len = header[1] & 0x7f;
 		bool masked = header[1] & 0x80;
 		assert(len != 126 && len != 127); // We do not care about larger headers.
-		printf("fin:%d  len:%d mask:%d\n", fin, len, masked);
+		STUPID_LOG(TRACE_WS_READ, "fin:%d  len:%d mask:%d ret:%d", fin, len, masked, ret);
 
 		assert(masked);
 
@@ -291,7 +294,6 @@ struct WSIO : IStupidIO {
 	void write(const void* src, unsigned int len) override {
 		unsigned char header[MAX_WS_HEADER_LEN];
 		int header_len = write_websocket_header(header, len);
-		printf("Write WS: hlen:%d payloadlen:%d\n", header_len, len);
 		_io->write(header, header_len);
 		_io->write(src, len);
 	}
