@@ -569,9 +569,9 @@ static void tx_frameupdate_zrle(StupidClient* client, int x, int y, unsigned int
 			for (auto trow=0u; trow<copy_height; trow++) {
 				for (auto i=0u; i<copy_width; i++) {
 					const auto pix = srcptr[i];
-					auto r = (pix >> 16) & 0xff;
+					auto r = (pix >> 0) & 0xff;
 					auto g = (pix >> 8) & 0xff;
-					auto b = (pix >> 0) & 0xff;
+					auto b = (pix >> 16) & 0xff;
 					if (show_updated_tiles) {
 						r = r*0.8 + rand_r*0.2;
 						g = g*0.8 + rand_g*0.2;
