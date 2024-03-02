@@ -996,6 +996,12 @@ static void stupid_thread(void* arg) {
 			if (client->supports_fb_geometry_change) {
 				framebuffer_update_size(client);
 			}
+
+			// Clear direty rects and just dirty the complete fb.
+			client->mutex.lock();
+			client->dirtyRects.clear();
+			client->dirtyRects.push_back({0, 0, priv->fb_width, priv->fb_height});
+			client->mutex.unlock();
 		}
 		priv->server_mutex.unlock();
 
