@@ -118,6 +118,7 @@ static constexpr int ZOUT_INCREMENT = 4096;
 #define RFB_STATUS_FAILED 1
 
 static constexpr bool TRACE_INFO = true;
+static constexpr bool TRACE_DIRTY = false;
 static constexpr bool TRACE_DEBUG = false;
 static constexpr bool TRACE_COMM = false;
 static constexpr bool TRACE_CONNECITONS = true;
@@ -347,6 +348,9 @@ struct StupidClient {
 	std::mutex mutex;
 	std::vector<DirtyRect> dirtyRects;
 	bool disconnect = false;
+	int rand_r;
+	int rand_g;
+	int rand_b;
 };
 
 #ifndef _WIN32
@@ -473,21 +477,33 @@ static void key_event(StupidClient* client) {
 	client->server->_p->cb->keyEvent(client, msg.key, msg.down_flag);
 }
 
-void tx_frameupdate_raw(StupidClient* client) {
+void tx_frameupdate_raw(StupidClient* client, int x, int y, unsigned int width, unsigned int height) {
 	auto priv = client->server->_p;
-	// +----------------------------+--------------+-------------+
-	// | No. of bytes               | Type [Value] | Description |
-	// +----------------------------+--------------+-------------+
-	// | width*height*bytesPerPixel | PIXEL array  | pixels      |
-	// +----------------------------+--------------+-------------+
-	frame_update_rect_header_t msg3;
-	msg3.x = htons(0);
-	msg3.y = htons(0);
-	msg3.w = htons(priv->fb_width);
-	msg3.h = htons(priv->fb_height);
-	msg3.encoding_type = RFB_ENCODING_RAW;
-	client->io->write(&msg3, sizeof(msg3));
-	client->io->write(priv->framebuffer, sizeof(priv->framebuffer));
+	const auto red_shift = client->pixel_format.red_shift;
+	const auto green_shift = client->pixel_format.green_shift;
+	const auto blue_shift = client->pixel_format.blue_shift;
+
+	int rand_r = client->rand_r;
+	int rand_g = client->rand_g;
+	int rand_b = client->rand_b;
+	const auto show_updated_tiles = client->server->show_updated_tiles;
+
+	for (auto idx=0u; idx < height; idx++) {
+		auto srcptr = &priv->framebuffer[priv->fb_width * (y + idx) + x];
+		for (auto i=0u; i<width; i++) {
+			const auto pix = srcptr[i];
+			auto r = (pix >> 0) & 0xff;
+			auto g = (pix >> 8) & 0xff;
+			auto b = (pix >> 16) & 0xff;
+			if (show_updated_tiles) {
+				r = r*0.8 + rand_r*0.2;
+				g = g*0.8 + rand_g*0.2;
+				b = b*0.8 + rand_b*0.2;
+			}
+			uint32_t val = r << red_shift | g << green_shift | b << blue_shift;
+			client->io->write(&val, 4);
+		}
+	}
 }
 
 void run_deflate(StupidClient* client, int flush_mode) {
@@ -521,13 +537,6 @@ int64_t now() {
 
 static void tx_frameupdate_zrle(StupidClient* client, int x, int y, unsigned int width, unsigned int height) {
 	auto time_start = now();
-	frame_update_rect_header_t msg3;
-	msg3.x = htons(x);
-	msg3.y = htons(y);
-	msg3.w = htons(width);
-	msg3.h = htons(height);
-	msg3.encoding_type = htonl(RFB_ENCODING_ZRLE);
-	client->io->write(&msg3, sizeof(msg3));
 
 	client->stream.avail_out = client->zout_size;
 	client->stream.next_out = client->zout;
@@ -541,9 +550,9 @@ static void tx_frameupdate_zrle(StupidClient* client, int x, int y, unsigned int
 	// BGRx -> CPIXEL 3 bytes
 	// RxGB -> CPIXEL 4 bytes
 
-	int rand_r;
-	int  rand_g;
-	int rand_b;
+	int rand_r = client->rand_r;
+	int rand_g = client->rand_g;
+	int rand_b = client->rand_b;
 
 	const auto red_shift = client->pixel_format.red_shift;
 	const auto green_shift = client->pixel_format.green_shift;
@@ -554,6 +563,12 @@ static void tx_frameupdate_zrle(StupidClient* client, int x, int y, unsigned int
 
 	const auto show_updated_tiles = client->server->show_updated_tiles;
 
+	// if (show_updated_tiles) { // Per rect update coloring
+		// rand_r = rand() & 0xff;
+		// rand_g = rand() & 0xff;
+		// rand_b = rand() & 0xff;
+	// }
+
 	for (auto starty=0u; starty < height; starty += tile_size) {
 		unsigned int copy_height = std::min(height - starty, tile_size);
 
@@ -561,11 +576,6 @@ static void tx_frameupdate_zrle(StupidClient* client, int x, int y, unsigned int
 			unsigned int copy_width = std::min(width - startx, tile_size);
 			auto srcptr = &priv->framebuffer[(x+startx) + (y+starty)*priv->fb_width];
 			auto dstptr = raw.rgb;
-			if (show_updated_tiles) {
-				rand_r = rand() & 0xff;
-				rand_g = rand() & 0xff;
-				rand_b = rand() & 0xff;
-			}
 			for (auto trow=0u; trow<copy_height; trow++) {
 				for (auto i=0u; i<copy_width; i++) {
 					const auto pix = srcptr[i];
@@ -633,23 +643,41 @@ void framebuffer_update(StupidClient* client) {
 	if (dirtyRects.empty())
 		return;
 
+	STUPID_LOG(TRACE_MSG, "Frame update tx");
+
 	client->wants_framebuffer = false;
 
-	if (client->supports_zrle) {
-		frame_update_header_t msg2;
-		msg2.type = RFB_FRAMEBUFFER_UPDATE;
-		msg2.num_rects = htons(dirtyRects.size());
-		client->io->write(&msg2, sizeof(msg2));
-		for (auto & rect : dirtyRects) {
-			STUPID_LOG(TRACE_DEBUG, "Update %d %d %d %d", rect.x, rect.y, rect.width, rect.height);
+	const auto show_updated_tiles = client->server->show_updated_tiles;
+
+	if (show_updated_tiles) { // Per update coloring
+		client->rand_r = rand() & 0xff;
+		client->rand_g = rand() & 0xff;
+		client->rand_b = rand() & 0xff;
+	}
+
+	frame_update_header_t msg2;
+	msg2.type = RFB_FRAMEBUFFER_UPDATE;
+	msg2.num_rects = htons(dirtyRects.size());
+	client->io->write(&msg2, sizeof(msg2));
+
+	for (auto & rect : dirtyRects) {
+		STUPID_LOG(TRACE_DEBUG, "Update %d %d %d %d", rect.x, rect.y, rect.width, rect.height);
+
+		frame_update_rect_header_t msg3;
+		msg3.x = htons(rect.x);
+		msg3.y = htons(rect.y);
+		msg3.w = htons(rect.width);
+		msg3.h = htons(rect.height);
+
+		if (client->supports_zrle) {
+			msg3.encoding_type = htonl(RFB_ENCODING_ZRLE);
+			client->io->write(&msg3, sizeof(msg3));
 			tx_frameupdate_zrle(client, rect.x, rect.y, rect.width, rect.height);
+		} else {
+			msg3.encoding_type = htonl(RFB_ENCODING_RAW);
+			client->io->write(&msg3, sizeof(msg3));
+			tx_frameupdate_raw(client, rect.x, rect.y, rect.width, rect.height);
 		}
-	} else {
-		frame_update_header_t msg2;
-		msg2.type = RFB_FRAMEBUFFER_UPDATE;
-		msg2.num_rects = htons(1);
-		client->io->write(&msg2, sizeof(msg2));
-		tx_frameupdate_raw(client);
 	}
 }
 
@@ -1086,7 +1114,20 @@ void stupidvnc_dirty(StupidvncServer* server, int x, int y, unsigned int width, 
 	if (height == 0) height = priv->fb_height;
 	for (auto c : priv->allClients) {
 		c->mutex.lock();
-		c->dirtyRects.push_back({x, y, width, height});
+		bool add_new_rect = true;
+		for (auto & rect : c->dirtyRects) {
+
+			// Simple skip of duplicates
+			if (x >= rect.x && (rect.x + rect.width) >= (x + width) &&
+			    y >= rect.y && (rect.y + rect.height) >= (y + height)) {
+				add_new_rect =  false;
+				break;
+			}
+		}
+		if (add_new_rect) {
+			STUPID_LOG(TRACE_DIRTY, "Marking dirty rect: %d,%d,%d,%d", x, y, width, height);
+			c->dirtyRects.push_back({x, y, width, height});
+		}
 		c->mutex.unlock();
 	}
 	priv->server_mutex.unlock();
