@@ -1082,7 +1082,10 @@ static void server_run(void* arg) {
 		FD_ZERO(&read_fds);
 		FD_SET(server_sock, &read_fds);
 
-		auto ret = select(server_sock+1, &read_fds, nullptr, nullptr, nullptr);
+		struct timeval tv;
+		tv.tv_sec = 0;
+		tv.tv_usec = 100000;
+		auto ret = select(server_sock+1, &read_fds, nullptr, nullptr, &tv);
 		if (ret == 1) {
 			int sock = accept(server_sock, nullptr, 0);
 
