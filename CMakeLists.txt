@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.10)
 project(stupidvnc)
 
+include(CheckIncludeFileCXX)
+
 set(BUILD_SHARED_LIBS TRUE)
 if (NOT CMAKE_BUILD_TYPE)
 	set(CMAKE_BUILD_TYPE "RelWithDebInfo")
@@ -50,7 +52,8 @@ endif()
 add_executable(lsdtest lsdtest.cpp)
 target_link_libraries(lsdtest stupidvnc)
 
-if (NOT WIN32)
+check_include_file_cxx("X11/extensions/XTest.h" XTEST_FOUND)
+if (XTEST_FOUND)
 	add_executable(x11stupidvnc x11stupidvnc.cpp)
 	target_link_libraries(x11stupidvnc stupidvnc X11 Xtst Xdamage Xfixes)
 endif()
