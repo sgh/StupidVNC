@@ -27,6 +27,8 @@
 
 #ifdef _WIN32
 #include <winsock2.h>
+#else
+#include <unistd.h>
 #endif
 
 #define FRAMEBUFFER_WIDTH  800
