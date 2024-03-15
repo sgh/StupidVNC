@@ -46,6 +46,7 @@
 struct StupidClient;
 struct STUPIDVNC_EXPORT StupidvncCallbacks {
 	bool requirePassword = false;
+	bool requireXVP = false;
 
 	virtual ~StupidvncCallbacks() {}
 
@@ -58,6 +59,7 @@ struct STUPIDVNC_EXPORT StupidvncCallbacks {
 };
 
 STUPIDVNC_EXPORT bool stupidvnc_check_passwd(StupidClient* client, const std::string& passwd);
+STUPIDVNC_EXPORT void stupidvnc_fetch_xvp_credentials(StupidClient* client, std::string& username, std::string& target);
 
 struct StupidvncServerPrivate;
 struct StupidvncServer {

@@ -113,6 +113,7 @@ static constexpr int ZOUT_INCREMENT = 4096;
 #define RFB_SEC_INVALID 0
 #define RFB_SEC_NONE    1
 #define RFB_SEC_VNC     2
+#define RFB_SEC_XVP     22
 
 #define RFB_STATUS_OK 0
 #define RFB_STATUS_FAILED 1
@@ -344,6 +345,10 @@ struct StupidClient {
 	// Challenge used during VNC auth
 	unsigned char challenge[16];
 	unsigned char response[16];
+
+	// XVP auth response
+	std::string username;
+	std::string target;
 
 	std::mutex mutex;
 	std::vector<DirtyRect> dirtyRects;
@@ -874,6 +879,33 @@ static bool vnc_auth(StupidClient* client) {
 	return true;
 }
 
+// The xvp security type extends the standard `VNC Authentication` with a
+// username and a target system that the client wishes to connect to.
+bool xvp_auth(StupidClient* client) {
+
+    unsigned char usernameLength[1];
+    unsigned char targetLength[1];
+
+    // Read lengths of data incoming
+    client->io->read(usernameLength, sizeof(usernameLength));
+    client->io->read(targetLength, sizeof(targetLength));
+
+    // Convert lengths to integers
+    int usernameLen = static_cast<int>(usernameLength[0]);
+    int targetLen = static_cast<int>(targetLength[0]);
+
+    // Read data (username & target)
+    char buf[1024];
+    client->io->read(buf, usernameLen);
+    client->username.assign(buf, usernameLen);
+    memset(buf, 0, sizeof(buf));
+
+    client->io->read(buf, targetLen);
+    client->target.assign(buf, targetLen);
+
+    return true;
+}
+
 bool stupidvnc_check_passwd(StupidClient *client, const std::string &passwd) {
 	unsigned char challenge_encrypted[16];
 	int challenge_encrypted_len = 0;
@@ -898,12 +930,20 @@ bool stupidvnc_check_passwd(StupidClient *client, const std::string &passwd) {
 
 	return memcmp(challenge_encrypted, client->response, sizeof(challenge_encrypted)) == 0;
 }
+
+void stupidvnc_fetch_xvp_credentials(StupidClient* client, std::string& username, std::string& target) {
+    username = client->username;
+    target = client->target;
+}
 #else
 static bool vnc_auth([[maybe_unused]] StupidClient* client) {
 	return false;
 }
 
 bool stupidvnc_check_passwd([[maybe_unused]] StupidClient *client, [[maybe_unused]] const std::string &passwd) {
+	return false;
+}
+bool xvp_auth([[maybe_unused]] StupidClient* client) {
 	return false;
 }
 #endif
@@ -924,26 +964,30 @@ static bool client_handshake(StupidClient* client) {
 	security_types[0] = 0;
 
 	// No authentication
-	if (!priv->cb->requirePassword) {
+	if (!priv->cb->requirePassword && !priv->cb->requireXVP) {
 		security_types[0]++;
 		security_types[++security_types_len] = RFB_SEC_NONE;
 	}
 
-	// VNC auth
+	// VNC or XVP auth
 	security_types[0]++;
-	security_types[++security_types_len] = RFB_SEC_VNC;
+	security_types[++security_types_len] = priv->cb->requireXVP ? RFB_SEC_XVP : RFB_SEC_VNC;
 
 	client->io->write(security_types, security_types_len+1);
 
 	uint8_t selected_security;
 	ret = client->io->read(&selected_security, 1);
 	STUPID_LOG(TRACE_INFO, "Client selected security type %d", selected_security);
-
 	// If sec!=null
 	// server send 16 byte random challenge
 	// client encrypts using DES+password. password is 8 bytes 0 padded
 
 	bool auth_ok = false;
+	if (selected_security == RFB_SEC_XVP) {
+		xvp_auth(client);
+		selected_security = RFB_SEC_VNC;
+	}
+
 	if (selected_security == RFB_SEC_VNC) {
 		auth_ok = vnc_auth(client);
 	}
