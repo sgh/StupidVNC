@@ -404,9 +404,10 @@ struct RAWIO : IStupidIO {
 		return -1;
 	}
 
-	void write(const void* src, unsigned int len) override {
-		int ret = send(_socket, (const char*)src, len, 0);
-		STUPID_LOG(TRACE_COMM, "send ret:%d", ret);
+	void flush() override {
+		int ret = send(_socket, (const char*)_txQ, _txQ_write_ptr, 0);
+		STUPID_LOG(TRACE_COMM, "send len:%u ret:%d", _txQ_write_ptr, ret);
+		 _txQ_write_ptr = 0;
 	}
 
 private:
@@ -506,7 +507,7 @@ void tx_frameupdate_raw(StupidClient* client, int x, int y, unsigned int width, 
 				b = b*0.8 + rand_b*0.2;
 			}
 			uint32_t val = r << red_shift | g << green_shift | b << blue_shift;
-			client->io->write(&val, 4);
+			client->io->write(&val, 4, FlushMode::NOFLUSH);
 		}
 	}
 }
@@ -618,8 +619,8 @@ static void tx_frameupdate_zrle(StupidClient* client, int x, int y, unsigned int
 	auto duration = (now() - time_start) / 1000;
 	STUPID_LOG(TRACE_DEBUG, "Write zlib data %lu compressed bytes : %lu raw   time:%" PRIi64 "ms\n", client->stream.total_out, client->stream.total_in, duration);
 	uint32_t zlibsize = htonl(client->stream.total_out);
-	client->io->write(&zlibsize, sizeof(zlibsize));
-	client->io->write(client->zout, client->stream.total_out);
+	client->io->write(&zlibsize, sizeof(zlibsize), FlushMode::NOFLUSH);
+	client->io->write(client->zout, client->stream.total_out, FlushMode::NOFLUSH);
 }
 
 void frame_update_request(StupidClient* client) {
@@ -663,7 +664,7 @@ void framebuffer_update(StupidClient* client) {
 	frame_update_header_t msg2;
 	msg2.type = RFB_FRAMEBUFFER_UPDATE;
 	msg2.num_rects = htons(dirtyRects.size());
-	client->io->write(&msg2, sizeof(msg2));
+	client->io->write(&msg2, sizeof(msg2), FlushMode::NOFLUSH);
 
 	for (auto & rect : dirtyRects) {
 		STUPID_LOG(TRACE_DEBUG, "Update %d %d %d %d", rect.x, rect.y, rect.width, rect.height);
@@ -676,21 +677,22 @@ void framebuffer_update(StupidClient* client) {
 
 		if (client->supports_zrle) {
 			msg3.encoding_type = htonl(RFB_ENCODING_ZRLE);
-			client->io->write(&msg3, sizeof(msg3));
+			client->io->write(&msg3, sizeof(msg3), FlushMode::NOFLUSH);
 			tx_frameupdate_zrle(client, rect.x, rect.y, rect.width, rect.height);
 		} else {
 			msg3.encoding_type = htonl(RFB_ENCODING_RAW);
-			client->io->write(&msg3, sizeof(msg3));
+			client->io->write(&msg3, sizeof(msg3), FlushMode::NOFLUSH);
 			tx_frameupdate_raw(client, rect.x, rect.y, rect.width, rect.height);
 		}
 	}
+	client->io->write(nullptr, 0, FlushMode::FLUSH);
 }
 
 static void framebuffer_update_size(StupidClient* client) {
 	frame_update_header_t msg2;
 	msg2.type = RFB_FRAMEBUFFER_UPDATE;
 	msg2.num_rects = htons(1);
-	client->io->write(&msg2, sizeof(msg2));
+	client->io->write(&msg2, sizeof(msg2), FlushMode::NOFLUSH);
 
 	auto priv = client->server->_p;
 
@@ -700,7 +702,7 @@ static void framebuffer_update_size(StupidClient* client) {
 	msg3.w = htons(priv->fb_width);
 	msg3.h = htons(priv->fb_height);
 	msg3.encoding_type = htonl(RFB_ENCODING_DESKTOPSIZE_PSEUDO);
-	client->io->write(&msg3, sizeof(msg3));
+	client->io->write(&msg3, sizeof(msg3), FlushMode::FLUSH);
 }
 
 void set_pixel_format(StupidClient* client) {
@@ -858,7 +860,7 @@ static bool vnc_auth(StupidClient* client) {
 	auto priv = client->server->_p;
 	RAND_bytes(client->challenge, sizeof(client->challenge));
 
-	client->io->write(client->challenge, sizeof(client->challenge));
+	client->io->write(client->challenge, sizeof(client->challenge), FlushMode::FLUSH);
 	client->io->read(client->response, sizeof(client->response));
 
 	// TX random 16 byte challenge
@@ -868,14 +870,14 @@ static bool vnc_auth(StupidClient* client) {
 	if (!priv->cb->clientAuth(client)) {
 		uint32_t security_result = htonl(RFB_STATUS_FAILED);
 		const char* error_string = "you entered a stupid password";
-		client->io->write(&security_result, sizeof(security_result));
+		client->io->write(&security_result, sizeof(security_result), FlushMode::NOFLUSH);
 		uint32_t error_string_length = htonl(strlen(error_string));
-		client->io->write(&error_string_length, sizeof(error_string_length));
-		client->io->write(error_string, strlen(error_string));
+		client->io->write(&error_string_length, sizeof(error_string_length), FlushMode::NOFLUSH);
+		client->io->write(error_string, strlen(error_string), FlushMode::FLUSH);
 		return false;
 	}
 
-	client->io->write(&security_result, sizeof(security_result));
+	client->io->write(&security_result, sizeof(security_result), FlushMode::FLUSH);
 	return true;
 }
 
@@ -951,7 +953,7 @@ bool xvp_auth([[maybe_unused]] StupidClient* client) {
 static bool client_handshake(StupidClient* client) {
 	auto priv = client->server->_p;
 	static const char* ident = "RFB 003.008\n";
-	client->io->write(ident, 12);
+	client->io->write(ident, 12, FlushMode::FLUSH);
 
 	char buf[1024];
 	int ret = client->io->read(buf, 12);
@@ -973,7 +975,7 @@ static bool client_handshake(StupidClient* client) {
 	security_types[0]++;
 	security_types[++security_types_len] = priv->cb->requireXVP ? RFB_SEC_XVP : RFB_SEC_VNC;
 
-	client->io->write(security_types, security_types_len+1);
+	client->io->write(security_types, security_types_len+1, FlushMode::FLUSH);
 
 	uint8_t selected_security;
 	ret = client->io->read(&selected_security, 1);
@@ -994,7 +996,7 @@ static bool client_handshake(StupidClient* client) {
 
 	if (selected_security == RFB_SEC_NONE) {
 		uint32_t security_result = RFB_STATUS_OK;
-		client->io->write(&security_result, sizeof(security_result));
+		client->io->write(&security_result, sizeof(security_result), FlushMode::FLUSH);
 		auth_ok = true;
 	}
 
@@ -1010,8 +1012,8 @@ static bool client_handshake(StupidClient* client) {
 	server_init_msg.width = htons(priv->fb_width);
 	server_init_msg.height = htons(priv->fb_height);
 	server_init_msg.namelength = htonl( strlen(name));
-	client->io->write(&server_init_msg, sizeof(server_init_msg));
-	client->io->write(name, strlen(name));
+	client->io->write(&server_init_msg, sizeof(server_init_msg), FlushMode::NOFLUSH);
+	client->io->write(name, strlen(name), FlushMode::FLUSH);
 
 	priv->cb->clientConnected(client);
 	return true;

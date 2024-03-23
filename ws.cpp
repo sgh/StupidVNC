@@ -8,6 +8,7 @@
 #include <cinttypes>
 #include <cstdio>
 #include <cassert>
+#include <algorithm>
 
 #include <openssl/sha.h>
 
@@ -29,6 +30,7 @@
 // https://www.rfc-editor.org/rfc/rfc6455.html
 
 static constexpr bool TRACE_WS_READ = false;
+static constexpr bool TRACE_WS_WRITE = false;
 static constexpr bool TRACE_WS_HANDSHAKE = false;
 
 static char* base64_encode(const unsigned char* input, size_t input_len) {
@@ -126,7 +128,7 @@ void ws_handshake(IStupidIO* io) {
 
 	STUPID_LOG(TRACE_WS_HANDSHAKE, "\"%s\"", response);
 
-	io->write(response, len);
+	io->write(response, len, FlushMode::FLUSH);
 }
 
 
@@ -209,11 +211,17 @@ struct WSIO : IStupidIO {
 		return bytes_read;
 	}
 
-	void write(const void* src, unsigned int len) override {
+	void flush() {
+		if (_txQ_write_ptr == 0)
+			return;
+
 		unsigned char header[MAX_WS_HEADER_LEN];
-		int header_len = write_websocket_header(header, len);
-		_io->write(header, header_len);
-		_io->write(src, len);
+		int header_len = write_websocket_header(header, _txQ_write_ptr);
+
+		STUPID_LOG(TRACE_WS_WRITE, "WS frame write - len %d", _txQ_write_ptr);
+		_io->write(header, header_len, FlushMode::NOFLUSH);
+		_io->write(_txQ, _txQ_write_ptr, FlushMode::FLUSH);
+		_txQ_write_ptr = 0;
 	}
 
 	void close() override {
