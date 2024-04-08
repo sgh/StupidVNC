@@ -636,7 +636,6 @@ void frame_update_request(StupidClient* client) {
 
 void framebuffer_update(StupidClient* client) {
 	auto priv = client->server->_p;
-	priv->cb->framebufferUpdate(client);
 
 	if (client->pixel_format.depth !=24 || client->pixel_format.bpp !=32)
 		return;
@@ -648,6 +647,8 @@ void framebuffer_update(StupidClient* client) {
 
 	if (dirtyRects.empty())
 		return;
+
+	priv->cb->framebufferUpdate(client);
 
 	STUPID_LOG(TRACE_MSG, "Frame update tx");
 
