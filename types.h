@@ -44,14 +44,14 @@ inline void IStupidIO::write(const void *src, unsigned int len, FlushMode flushm
 	auto csrc = (const char*)src;
 	while (len > 0) {
 		unsigned int remaining_space = sizeof(_txQ) - _txQ_write_ptr;
-		if (remaining_space == 0)
+		if (remaining_space > 0) {
+			auto chunk_size = std::min(remaining_space, len);
+			memcpy(&_txQ[_txQ_write_ptr], csrc, chunk_size);
+			_txQ_write_ptr += chunk_size;
+			len -= chunk_size;
+			csrc += chunk_size;
+		} else
 			flush();
-
-		auto chunk_size = std::min(remaining_space, len);
-		memcpy(&_txQ[_txQ_write_ptr], csrc, chunk_size);
-		_txQ_write_ptr += chunk_size;
-		len -= chunk_size;
-		csrc += chunk_size;
 	}
 
 	if (flushmode == FlushMode::FLUSH)
