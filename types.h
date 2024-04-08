@@ -36,7 +36,7 @@ struct IStupidIO {
 	virtual void flush() = 0;
 
 	unsigned char _txQ[256*1024];
-	unsigned int _txQ_write_ptr;
+	unsigned int _txQ_write_ptr = 0;
 };
 
 inline void IStupidIO::write(const void *src, unsigned int len, FlushMode flushmode)
