@@ -123,7 +123,12 @@ void ws_handshake(IStupidIO* io) {
 	sec += "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 	auto response_sec = sha1_base64_encode(sec.c_str());
 
-	int len = snprintf((char*)response, sizeof(response), "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: %s\r\nSec-WebSocket-Protocol: binary\r\n\r\n", response_sec);
+
+	int len;
+	if (strstr(buffer, "Sec-WebSocket-Protocol: binary"))
+		len = snprintf((char*)response, sizeof(response), "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: %s\r\nSec-WebSocket-Protocol: binary\r\n\r\n", response_sec);
+	else
+		len = snprintf((char*)response, sizeof(response), "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: %s\r\n\r\n", response_sec);
 	free(response_sec);
 
 	STUPID_LOG(TRACE_WS_HANDSHAKE, "\"%s\"", response);
