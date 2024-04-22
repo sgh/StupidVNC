@@ -96,7 +96,7 @@ struct VNCCallbacks : public StupidvncCallbacks {
 	}
 
 
-	void keyEvent([[maybe_unused]] StupidClient* client, unsigned char key, bool down) override {
+	void keyEvent([[maybe_unused]] StupidClient* client, unsigned int key, bool down) override {
 		if (!down)
 			return;
 		if (key == 'a') distmulR+= 0.001;

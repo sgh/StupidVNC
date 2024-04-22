@@ -51,7 +51,7 @@ struct STUPIDVNC_EXPORT StupidvncCallbacks {
 	virtual ~StupidvncCallbacks() {}
 
 	virtual void pointerEvent(StupidClient* client, int x, int y, int button_mask);
-	virtual void keyEvent(StupidClient* client, unsigned char key, bool down);
+	virtual void keyEvent(StupidClient* client, unsigned int key, bool down);
 	virtual void framebufferUpdate(StupidClient* client);
 	virtual void clientConnected(StupidClient* client);
 	virtual void clientDisconnected(StupidClient* client);
@@ -81,7 +81,7 @@ STUPIDVNC_EXPORT void stupidvnc_stop(StupidvncServer* server);
 // Default implementation of StupidvncCallbacks
 inline void StupidvncCallbacks::pointerEvent(StupidClient *, int, int, int) {}
 inline void StupidvncCallbacks::framebufferUpdate(StupidClient* ) { }
-inline void StupidvncCallbacks::keyEvent(StupidClient *, unsigned char, bool) {}
+inline void StupidvncCallbacks::keyEvent(StupidClient *, unsigned int, bool) {}
 inline void StupidvncCallbacks::clientConnected(StupidClient *) {}
 inline void StupidvncCallbacks::clientDisconnected(StupidClient *) {}
 inline bool StupidvncCallbacks::clientAuth(StupidClient *) { return true; }
