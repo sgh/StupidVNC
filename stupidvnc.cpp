@@ -641,12 +641,36 @@ void framebuffer_update(StupidClient* client) {
 		return;
 
 	client->mutex.lock();
-	auto dirtyRects = client->dirtyRects;
+	if (client->dirtyRects.empty()) {
+		client->mutex.unlock();
+		return;
+	}
+
+	std::vector<DirtyRect> dirtyRects;
+	dirtyRects.push_back(client->dirtyRects.front());
+	for (auto & rect : client->dirtyRects) {
+		auto & prev_rect = dirtyRects.back();
+		bool skip_add = false;
+		if (rect.x == prev_rect.x && rect.width == prev_rect.width) {
+			if ( (rect.y <= prev_rect.y && rect.y+rect.height > prev_rect.y)
+				 || (rect.y > prev_rect.y && rect.y+rect.height > prev_rect.y+prev_rect.height)
+				 ) {
+
+				auto top = std::min(prev_rect.y, rect.y);
+				auto bottom = std::max(prev_rect.y+prev_rect.height, rect.y+rect.height);
+
+				prev_rect.y = top;
+				prev_rect.height = bottom-top;;
+				skip_add = true;
+			}
+		}
+
+		if (!skip_add)
+			dirtyRects.push_back(rect);
+	}
 	client->dirtyRects.clear();
 	client->mutex.unlock();
 
-	if (dirtyRects.empty())
-		return;
 
 	priv->cb->framebufferUpdate(client);
 
@@ -1174,11 +1198,36 @@ void stupidvnc_dirty(StupidvncServer* server, int x, int y, unsigned int width, 
 		for (auto & rect : c->dirtyRects) {
 
 			// Simple skip of duplicates
-			if (x >= rect.x && (rect.x + rect.width) >= (x + width) &&
-			    y >= rect.y && (rect.y + rect.height) >= (y + height)) {
-				add_new_rect =  false;
-				break;
+			// if (x >= rect.x && (rect.x + rect.width) >= (x + width) &&
+			    // y >= rect.y && (rect.y + rect.height) >= (y + height)) {
+				// add_new_rect =  false;
+				// break;
+			// }
+
+			// Check if we can just extend the current rect sideways in case their height align up perfectly.
+			if (rect.y == y && rect.height == height) {
+				if (x >= rect.x && x <= (rect.x + rect.width)) {
+					auto left_edge = std::min(x, rect.x);
+					auto right_edge = std::max(x+width, rect.x+rect.width);
+					rect.x = left_edge;
+					rect.width = right_edge - left_edge;
+					// STUPID_LOG(true, "Extend right");
+					add_new_rect =  false;
+					break;
+				}
+
+				if (x < rect.x && x+width >= rect.x) {
+					auto left_edge = std::min(x, rect.x);
+					auto right_edge = std::max(x+width, rect.x+rect.width);
+					rect.x = left_edge;
+					rect.width = right_edge - left_edge;
+					// STUPID_LOG(true, "Extend right");
+					add_new_rect =  false;
+					break;
+				}
 			}
+
+
 		}
 		if (add_new_rect) {
 			STUPID_LOG(TRACE_DIRTY, "Marking dirty rect: %d,%d,%d,%d", x, y, width, height);
