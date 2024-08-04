@@ -83,13 +83,14 @@ static constexpr int ZOUT_INCREMENT = 4096;
 #define RFB_ENCODING_ZRLE 16
 #define RFB_ENCODING_CURSOR_PSEUDO -239
 #define RFB_ENCODING_DESKTOPSIZE_PSEUDO -223
+#define RFB_ENCODING_TIGHTPNG -260
+#define RFB_ENCODING_TIGHT 7
 
 // https://www.wikiwand.com/en/RFB_protocol
 // https://github.com/novnc/noVNC/blob/master/core/encodings.js
 // https://vncdotool.readthedocs.io/en/0.8.0/rfbproto.html
 // https://liu.diva-portal.org/smash/get/diva2:1823614/FULLTEXT02.pdf
 
-// encoding UNKNOWN (7)       // Tight
 // encoding ZRLE
 // encoding UNKNOWN (21)       // JPEG
 // encoding HEXTILE
@@ -100,7 +101,6 @@ static constexpr int ZOUT_INCREMENT = 4096;
 // encoding UNKNOWN  -256 -- -247   CompressLevel (Tight encoding)
 // encoding UNKNOWN (-224) // LastRect
 // encoding UNKNOWN (-258) // QEMU Extended keyboard
-// encoding UNKNOWN (-260) // TightPNG
 // encoding UNKNOWN (-261) // QEMYLedEvent
 // encoding UNKNOWN (-307) // DesktopName
 // encoding UNKNOWN (-308) // ExtendedDesktopSize
@@ -122,6 +122,7 @@ static constexpr bool TRACE_INFO = true;
 static constexpr bool TRACE_DIRTY = false;
 static constexpr bool TRACE_DEBUG = false;
 static constexpr bool TRACE_COMM = false;
+static constexpr bool TRACE_COMM_TX = false;
 static constexpr bool TRACE_CONNECITONS = true;
 static constexpr bool TRACE_MSG = false;
 
@@ -335,6 +336,10 @@ struct StupidClient {
 	pixel_format_t pixel_format;
 	bool wants_framebuffer = false;
 	bool supports_zrle = false;
+	bool supports_tight = false;
+#ifdef HAS_LIBPNG
+	bool supports_tightpng = false;
+#endif
 	bool supports_fb_geometry_change = false;
 	IStupidIO* io;
 	unsigned int zout_size = 4096;
@@ -406,7 +411,7 @@ struct RAWIO : IStupidIO {
 
 	void flush() override {
 		int ret = send(_socket, (const char*)_txQ, _txQ_write_ptr, 0);
-		STUPID_LOG(TRACE_COMM, "send len:%u ret:%d", _txQ_write_ptr, ret);
+		STUPID_LOG(TRACE_COMM_TX, "send len:%u ret:%d", _txQ_write_ptr, ret);
 		 _txQ_write_ptr = 0;
 	}
 
@@ -481,6 +486,148 @@ static void key_event(StupidClient* client) {
 	msg.key = ntohl(msg.key);
 	STUPID_LOG(TRACE_MSG, "keyevent:  down:%d   key:%u", msg.down_flag, msg.key);
 	client->server->_p->cb->keyEvent(client, msg.key, msg.down_flag);
+}
+
+
+static void tx_tight_len(IStupidIO* io, unsigned int len) {
+	if (len < 1u<<7) {
+		uint8_t u8 = len;
+		io->write(&u8, 1, FlushMode::NOFLUSH);
+	} else if (len < 1u<<14) {
+		uint8_t u8;
+		u8 = (1<<7) | (len & 0x7f);
+		io->write(&u8, 1, FlushMode::NOFLUSH);
+		len >>= 7;
+		u8 = len & 0xff;
+		io->write(&u8, 1, FlushMode::NOFLUSH);
+	} else if (len < 1u<<22) {
+		uint8_t u8;
+		u8 = (1<<7) | (len & 0x7f) ;
+		io->write(&u8, 1, FlushMode::NOFLUSH);
+		len >>= 7;
+		u8 = (1<<7) | (len & 0x7f);
+		io->write(&u8, 1, FlushMode::NOFLUSH);
+		len >>= 7;
+		u8 = len & 0xff;
+		io->write(&u8, 1, FlushMode::NOFLUSH);
+	} else {
+		assert(false); // Too long !!!
+	}
+}
+
+
+#ifdef HAS_LIBPNG
+#include <png.h>
+
+typedef struct {
+	uint8_t* buffer;
+	size_t size;
+	size_t capacity;
+} MemoryBuffer;
+
+static void png_write_to_memory(png_structp png_ptr, png_bytep data, png_size_t length) {
+	MemoryBuffer* mem = (MemoryBuffer*)png_get_io_ptr(png_ptr);
+
+	if (mem->capacity - mem->size < length) {
+		mem->capacity = mem->size + length + 16384;
+		mem->buffer = (uint8_t*)realloc(mem->buffer, mem->capacity);
+	}
+
+	memcpy(mem->buffer + mem->size, data, length);
+	mem->size += length;
+}
+
+static void save_png_to_memory(uint8_t** out_data, size_t* out_size, uint32_t* framebuffer, unsigned int fb_width, unsigned int fb_height, unsigned int x, unsigned int y, unsigned int width, unsigned int height) {
+	MemoryBuffer mem = { nullptr, 0, 0 };
+
+	png_structp png = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
+	if (!png) {
+		fprintf(stderr, "Failed to create PNG write struct\n");
+		return;
+	}
+
+	png_infop info = png_create_info_struct(png);
+	if (!info) {
+		fprintf(stderr, "Failed to create PNG info struct\n");
+		png_destroy_write_struct(&png, (png_infopp)NULL);
+		return;
+	}
+
+	if (setjmp(png_jmpbuf(png))) {
+		fprintf(stderr, "Error during PNG creation\n");
+		png_destroy_write_struct(&png, &info);
+		free(mem.buffer);
+		return;
+	}
+
+	png_set_write_fn(png, &mem, png_write_to_memory, NULL);
+
+	png_set_IHDR(
+		png,
+		info,
+		width, height,
+		8,
+		PNG_COLOR_TYPE_RGBA,
+		PNG_INTERLACE_NONE,
+		PNG_COMPRESSION_TYPE_DEFAULT,
+		PNG_FILTER_TYPE_DEFAULT
+	);
+
+	png_write_info(png, info);
+
+	png_bytep row = (png_bytep) malloc(4 * width * sizeof(png_byte));
+	for (unsigned int j = 0; j < height; j++) {
+		for (unsigned int i = 0; i < width; i++) {
+			uint32_t pixel = framebuffer[(y + j) * fb_width + (x + i)];
+
+			auto r = (pixel >> 0) & 0xff;
+			auto g = (pixel >> 8) & 0xff;
+			auto b = (pixel >> 16) & 0xff;
+
+			row[i*4 + 0] = r; // Red
+			row[i*4 + 1] = g; // Green
+			row[i*4 + 2] = b; // Blue
+			row[i*4 + 3] = 0xff; // Alpha
+		}
+		png_write_row(png, row);
+	}
+
+	free(row);
+	png_write_end(png, NULL);
+
+	png_destroy_write_struct(&png, &info);
+
+	*out_data = mem.buffer;
+	*out_size = mem.size;
+}
+
+static void tx_frameupdate_tightpng(StupidClient* client, int x, int y, unsigned int width, unsigned int height) {
+	// STUPID_LOG(TRACE_INFO, "TightPNG frame update %u %u", width, height);
+
+	auto server = client->server;
+	auto priv = server->_p;
+
+	// compress png
+	uint8_t* out_data;
+	size_t out_size;
+	save_png_to_memory(&out_data, &out_size, priv->framebuffer, priv->fb_width, priv->fb_height, x, y, width, height);
+
+	// STUPID_LOG(TRACE_INFO, "TightPNG len %u", out_size);
+
+	uint8_t compression_control;
+	compression_control = 0 & 0x0f; // Reset no zlib streams
+	compression_control = 10 << 4; // Specify PNG Compressions
+
+	client->io->write(&compression_control, 1, FlushMode::NOFLUSH);
+	tx_tight_len(client->io, out_size);
+	client->io->write(out_data, out_size, FlushMode::FLUSH);
+	free(out_data);
+}
+#endif
+
+static void tx_frameupdate_tight(StupidClient* client, int x, int y, unsigned int width, unsigned int height) {
+
+	STUPID_LOG(TRACE_INFO, "Tight frame update");
 }
 
 void tx_frameupdate_raw(StupidClient* client, int x, int y, unsigned int width, unsigned int height) {
@@ -569,11 +716,11 @@ static void tx_frameupdate_zrle(StupidClient* client, int x, int y, unsigned int
 
 	const auto show_updated_tiles = client->server->show_updated_tiles;
 
-	// if (show_updated_tiles) { // Per rect update coloring
-		// rand_r = rand() & 0xff;
-		// rand_g = rand() & 0xff;
-		// rand_b = rand() & 0xff;
-	// }
+	if (show_updated_tiles) { // Per rect update coloring
+		rand_r = rand() & 0xff;
+		rand_g = rand() & 0xff;
+		rand_b = rand() & 0xff;
+	}
 
 	for (auto starty=0u; starty < height; starty += tile_size) {
 		unsigned int copy_height = std::min(height - starty, tile_size);
@@ -700,6 +847,18 @@ void framebuffer_update(StupidClient* client) {
 		msg3.w = htons(rect.width);
 		msg3.h = htons(rect.height);
 
+#ifdef HAS_LIBPNG
+		if (client->supports_tightpng) {
+			msg3.encoding_type = htonl(RFB_ENCODING_TIGHTPNG);
+			client->io->write(&msg3, sizeof(msg3), FlushMode::NOFLUSH);
+			tx_frameupdate_tightpng(client, rect.x, rect.y, rect.width, rect.height);
+		} else
+#endif
+		if (client->supports_tight) {
+			msg3.encoding_type = htonl(RFB_ENCODING_TIGHT);
+			client->io->write(&msg3, sizeof(msg3), FlushMode::NOFLUSH);
+			tx_frameupdate_tight(client, rect.x, rect.y, rect.width, rect.height);
+		} else
 		if (client->supports_zrle) {
 			msg3.encoding_type = htonl(RFB_ENCODING_ZRLE);
 			client->io->write(&msg3, sizeof(msg3), FlushMode::NOFLUSH);
@@ -791,6 +950,8 @@ void set_encoding(StupidClient* client) {
 			case RFB_ENCODING_HEXTILE:            STUPID_LOG(TRACE_INFO, "   encoding HEXTILE"); break;
 			case RFB_ENCODING_TRLE:               STUPID_LOG(TRACE_INFO, "   encoding TRLE"); break;
 			case RFB_ENCODING_ZRLE:               STUPID_LOG(TRACE_INFO, "   encoding ZRLE"); client->supports_zrle=true;  break;
+			// case RFB_ENCODING_TIGHT:              STUPID_LOG(TRACE_INFO, "   encoding Tight"); client->supports_tight=true;  break;
+			case RFB_ENCODING_TIGHTPNG:           STUPID_LOG(TRACE_INFO, "   encoding TightPNG"); client->supports_tightpng=true;  break;
 			case RFB_ENCODING_CURSOR_PSEUDO:      STUPID_LOG(TRACE_INFO, "   encoding CURSOR"); break;
 			case RFB_ENCODING_DESKTOPSIZE_PSEUDO: STUPID_LOG(TRACE_INFO, "   encoding DESKTOP"); client->supports_fb_geometry_change = true; break;
 			default: STUPID_LOG(TRACE_INFO, "   encoding UNKNOWN %d)", encoding);

@@ -19,6 +19,7 @@ endif()
 
 find_package(ZLIB REQUIRED)
 find_package(OpenSSL "3.0")
+find_package(PNG)
 
 MESSAGE (STATUS "Found? ${OPENSSL_FOUND}")
 MESSAGE (STATUS "Includes: ${OPENSSL_INCLUDE_DIR}")
@@ -48,6 +49,10 @@ if (OPENSSL_FOUND)
 	target_compile_definitions(stupidvnc PRIVATE HAS_OPENSSL)
 endif()
 
+if (PNG_FOUND)
+	target_link_libraries(stupidvnc PUBLIC PNG::PNG)
+	target_compile_definitions(stupidvnc PRIVATE HAS_LIBPNG)
+endif()
 
 add_executable(lsdtest lsdtest.cpp)
 target_link_libraries(lsdtest stupidvnc)
