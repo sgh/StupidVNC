@@ -1055,7 +1055,7 @@ static bool vnc_auth(StupidClient* client) {
 	uint32_t security_result = htonl(RFB_STATUS_OK);
 	if (!priv->cb->clientAuth(client)) {
 		uint32_t security_result = htonl(RFB_STATUS_FAILED);
-		const char* error_string = "you entered a stupid password";
+		const char* error_string = "you entered an invalid password";
 		client->io->write(&security_result, sizeof(security_result), FlushMode::NOFLUSH);
 		uint32_t error_string_length = htonl(strlen(error_string));
 		client->io->write(&error_string_length, sizeof(error_string_length), FlushMode::NOFLUSH);
@@ -1194,7 +1194,7 @@ static bool client_handshake(StupidClient* client) {
 	STUPID_LOG(TRACE_INFO, "Client - shared %d", buf[0]);
 
 	struct server_init_msg_t server_init_msg;
-	const char* name = "STUPIDRFB";
+	const char* name = "RFB";
 	server_init_msg.width = htons(priv->fb_width);
 	server_init_msg.height = htons(priv->fb_height);
 	server_init_msg.namelength = htonl( strlen(name));
