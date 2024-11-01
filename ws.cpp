@@ -140,6 +140,7 @@ void ws_handshake(IStupidIO* io) {
 #define MAX_WS_HEADER_LEN 20
 
 struct WSIO : IStupidIO {
+	bool please_close = false;
 
 	WSIO(IStupidIO* io) {
 		_io = io;
@@ -166,10 +167,11 @@ struct WSIO : IStupidIO {
 		hlen += ret;
 
 		bool fin = header[0] & 0x80;
+		unsigned int opcode = header[0] & 0x0f;
 		int len = header[1] & 0x7f;
 		bool masked = header[1] & 0x80;
 		assert(len != 126 && len != 127); // We do not care about larger headers.
-		STUPID_LOG(TRACE_WS_READ, "fin:%d  len:%d mask:%d ret:%d", fin, len, masked, ret);
+		STUPID_LOG(TRACE_WS_READ, "WS: fin:%d  len:%d mask:%d ret:%d opcode:%u", fin, len, masked, ret, opcode);
 
 		assert(masked);
 
@@ -182,6 +184,9 @@ struct WSIO : IStupidIO {
 		// fflush(0);
 		_payload_left = len;
 		_payload_idx = 0;
+
+		if (opcode == 8)
+			please_close = true;
 		return hlen;
 	}
 
@@ -197,6 +202,10 @@ struct WSIO : IStupidIO {
 				STUPID_LOG(TRACE_WS_READ, "Read header ret:%d\n", ret);
 				if (ret <= 0)
 					return ret;
+				if (please_close) {
+					STUPID_LOG(TRACE_WS_READ, "WS: close frame");
+					return 0;
+				}
 			}
 
 			ret = _io->read(cdst, len);
