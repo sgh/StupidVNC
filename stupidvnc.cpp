@@ -1213,6 +1213,7 @@ static void stupid_thread(void* arg) {
 	client->io->handshake();
 	if (!client_handshake(client)) {
 		delete client;
+		STUPID_LOG(TRACE_CONNECITONS, "Disconnected - client handshake failed.");
 		return;
 	}
 
