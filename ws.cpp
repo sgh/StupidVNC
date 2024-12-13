@@ -102,24 +102,29 @@ static int write_websocket_header(unsigned char* header, unsigned int len) {
 
 
 void ws_handshake(IStupidIO* io) {
-	char buffer[1024] = {0};
-	io->read(buffer, sizeof(buffer));
-	STUPID_LOG(TRACE_WS_HANDSHAKE, "Received message from client: %s", buffer);
+	std::string header;
+	char buffer[1024];
+	do {
+		auto len = io->read(buffer, sizeof(buffer));
+		header.append(buffer, len);
+		if (header.size() > 1024*124) // Limit size to 1M
+			return;
+	} while (header.find("\r\n\r\n") == std::string::npos);
+
+	STUPID_LOG(TRACE_WS_HANDSHAKE, "Received header from client: %s", header.c_str());
 
 	std::string sec;
-	auto sec_ws_key = strstr(buffer, "Sec-WebSocket-Key: ");
-	if (!sec_ws_key)
+	const char* sec_ws_str = "Sec-WebSocket-Key: ";
+	auto sec_ws_key_pos = header.find(sec_ws_str);
+	if (sec_ws_key_pos == std::string::npos)
 		return;
 
-	auto crnl = strstr(sec_ws_key, "\r\n");
-	if (crnl) {
-		auto space = strstr(sec_ws_key, " ");
-		int len = crnl - space;
-		sec.assign(space+1, len-1);
-		// printf("\"%s\"\n", sec.c_str());
-	}
-	unsigned char response[1024];
+	auto crnl_pos = header.find("\r\n", sec_ws_key_pos);
+	auto sec_str_len = crnl_pos - (sec_ws_key_pos + strlen(sec_ws_str));
+	sec.assign(header.substr(sec_ws_key_pos + strlen(sec_ws_str), sec_str_len));
+	STUPID_LOG(TRACE_WS_HANDSHAKE, "\"%s\"\n", sec.c_str());
 
+	unsigned char response[1024];
 	sec += "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 	auto response_sec = sha1_base64_encode(sec.c_str());
 
