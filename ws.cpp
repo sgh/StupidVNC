@@ -107,7 +107,7 @@ void ws_handshake(IStupidIO* io) {
 	do {
 		auto len = io->read(buffer, sizeof(buffer));
 		header.append(buffer, len);
-		if (header.size() > 1024*124) // Limit size to 1M
+		if (header.size() > 1024*1024) // Limit size to 1M
 			return;
 	} while (header.find("\r\n\r\n") == std::string::npos);
 
