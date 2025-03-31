@@ -31,7 +31,7 @@
 
 static constexpr bool TRACE_WS_READ = false;
 static constexpr bool TRACE_WS_WRITE = false;
-static constexpr bool TRACE_WS_HANDSHAKE = false;
+static constexpr bool TRACE_WS_HANDSHAKE = true;
 
 static char* base64_encode(const unsigned char* input, size_t input_len) {
 	const char base64_chars[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -102,6 +102,7 @@ static int write_websocket_header(unsigned char* header, unsigned int len) {
 
 
 void ws_handshake(IStupidIO* io) {
+	STUPID_LOG(TRACE_WS_HANDSHAKE, "Waiting for header from client");
 	std::string header;
 	char buffer[1024];
 	do {
