@@ -1217,6 +1217,8 @@ static void stupid_thread(void* arg) {
 		return;
 	}
 
+	STUPID_LOG(TRACE_CONNECITONS, "Connected - client handshake successful.");
+
 	priv->server_mutex.lock();
 	priv->allClients.push_back(client);
 	priv->server_mutex.unlock();
@@ -1320,6 +1322,7 @@ static void server_run(void* arg) {
 		tv.tv_usec = 100000;
 		auto ret = select(server_sock+1, &read_fds, nullptr, nullptr, &tv);
 		if (ret == 1) {
+			STUPID_LOG(TRACE_CONNECITONS, "Client request detected");
 			int sock = accept(server_sock, nullptr, 0);
 
 			IStupidIO* io = new RAWIO(sock);
