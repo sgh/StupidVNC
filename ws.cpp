@@ -101,7 +101,7 @@ static int write_websocket_header(unsigned char* header, unsigned int len) {
 }
 
 
-void ws_handshake(IStupidIO* io) {
+static void ws_handshake(IStupidIO* io) {
 	STUPID_LOG(TRACE_WS_HANDSHAKE, "Waiting for header from client");
 	std::string header;
 	char buffer[1024];
@@ -152,11 +152,14 @@ struct WSIO : IStupidIO {
 
 	WSIO(IStupidIO* io) {
 		_io = io;
-		ws_handshake(_io);
 	}
 
 	~WSIO() {
 		delete _io;
+	}
+
+	void handshake() override {
+		ws_handshake(_io);
 	}
 
 	int read_websocket_header(bool block) {
