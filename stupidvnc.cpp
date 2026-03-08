@@ -155,7 +155,7 @@ struct pixel_format_t {
 static_assert(sizeof(struct pixel_format_t) == 16, "Wrong pizel_format_t size");
 
 struct RGB {
-	uint32_t val:24;
+	uint8_t R,G,B;
 } __attribute__((packed));
 static_assert(sizeof(struct RGB) == 3, "Wrong size");
 
@@ -741,8 +741,9 @@ static void tx_frameupdate_zrle(StupidClient* client, int x, int y, unsigned int
 						b = b*0.8 + rand_b*0.2;
 					}
 
-					unsigned int val = r << red_shift | g << green_shift | b << blue_shift;
-					dstptr->val = val;
+					dstptr->R = r;
+					dstptr->G = g;
+					dstptr->B = b;
 					dstptr++;
 				}
 				srcptr += priv->fb_width;
