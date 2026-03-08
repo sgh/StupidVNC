@@ -1,0 +1,76 @@
+name: Build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  linux:
+    name: Linux
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake \
+            build-essential \
+            zlib1g-dev \
+            libssl-dev \
+            libpng-dev \
+            libx11-dev \
+            libxtst-dev \
+            libxdamage-dev \
+            libxfixes-dev
+
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: stupidvnc-linux
+          path: |
+            build/libstupidvnc.so
+            build/lsdtest
+            build/x11stupidvnc
+          if-no-files-found: warn
+
+  # windows-cross:
+  #   name: Windows (cross-compile)
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #
+  #     - name: Install cross-compilation tools
+  #       run: |
+  #         sudo apt-get update
+  #         sudo apt-get install -y \
+  #           cmake \
+  #           mingw-w64 \
+  #           libz-mingw-w64-dev
+  #
+  #     - name: Configure
+  #       run: |
+  #         cmake -B build-windows \
+  #           -DCMAKE_BUILD_TYPE=Release \
+  #           -DCMAKE_TOOLCHAIN_FILE=cmake/mingw-w64-x86_64.cmake
+  #
+  #     - name: Build
+  #       run: cmake --build build-windows --parallel
+  #
+  #     - name: Upload artifacts
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: stupidvnc-windows
+  #         path: |
+  #           build-windows/libstupidvnc.dll
+  #           build-windows/libstupidvnc.dll.a
+  #           build-windows/lsdtest.exe
+  #         if-no-files-found: warn
