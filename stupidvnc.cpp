@@ -985,8 +985,23 @@ void client_cut_text(StupidClient* client) {
 	uint32_t len;
 	client->io->read(&len, sizeof(len));
 	len = ntohl(len);
-	client->io->read(dummy, len);
-	dummy[len] = 0;
+
+	// Read the client-supplied text in bounded chunks so an oversized length
+	// cannot overflow the fixed buffer. Only the first chunk is kept for the log.
+	uint32_t first = 0;
+	uint32_t remaining = len;
+	while (remaining > 0) {
+		uint32_t chunk = remaining < sizeof(dummy) ? remaining : sizeof(dummy);
+		int ret = client->io->read(dummy, chunk);
+		if (ret <= 0)
+			return;
+		if (first == 0)
+			first = (uint32_t)ret;
+		remaining -= (uint32_t)ret;
+	}
+	if (first >= sizeof(dummy))
+		first = sizeof(dummy) - 1;
+	dummy[first] = 0;
 	STUPID_LOG(TRACE_MSG, "SERVER CUT: %s\n", dummy);
 }
 

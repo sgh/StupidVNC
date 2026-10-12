@@ -107,7 +107,7 @@ static void ws_handshake(IStupidIO* io) {
 	char buffer[1024];
 	do {
 		auto len = io->read(buffer, sizeof(buffer));
-		if (len == 0)
+		if (len <= 0)
 			return;
 		header.append(buffer, len);
 		if (header.size() > 1024*1024) // Limit size to 1M
